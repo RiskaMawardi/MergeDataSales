@@ -2,11 +2,10 @@ import pandas as pd
 import os
 import glob
 
-# 📁 Folder tempat file Excel disimpan
+
 folder_path = r'D:\DataFromPrincipal\DataEBLO\merge'
 output_file = os.path.join(folder_path, 'eblo.xlsx')
 
-# 🎯 Template header untuk setiap marketplace
 headers = {
     "SHOPEE": [
         "NO", "BRAND", "No# Pesanan", "Status Pesanan", "Status Pembatalan/ Pengembalian",
@@ -59,13 +58,12 @@ headers = {
     ]
 }
 
-# 🔍 Cari semua file Excel di folder
 files = glob.glob(os.path.join(folder_path, '*.xlsx'))
 combined_sheets = {}
 
 for file_path in files:
     if os.path.basename(file_path).lower() == 'eblo.xlsx':
-        continue  # skip hasil gabungan agar tidak dibaca ulang
+        continue 
 
     brand = os.path.splitext(os.path.basename(file_path))[0].split(' ')[0]
     print(f"\nProcessing: {brand}")
@@ -74,10 +72,9 @@ for file_path in files:
     for sheet_name in xls.sheet_names:
         clean_name = sheet_name.strip().upper()
 
-        # 🔁 Gabungkan TOKPED NEW / TOKOPEDIA NEW / TOKOPEDIA ke TIKTOK
         if clean_name in ["TOKPED NEW", "TOKOPEDIA NEW", "TOKOPEDIA"]:
             clean_name = "TIKTOK"
-        # 🔁 Gabungkan LAZADA / LAZADAA ke LAZADA    
+
         if clean_name in ["LAZADAA"]:
             clean_name = "LAZADA"
         try:
@@ -87,7 +84,6 @@ for file_path in files:
                 print(f"⚠️ Sheet {sheet_name} dari {brand} kosong, dilewati.")
                 continue
 
-            # 🔎 Deteksi header (baris dengan nilai paling banyak)
             header_row = df.notna().sum(axis=1).idxmax()
             df.columns = df.iloc[header_row].astype(str).str.strip()
             df = df.iloc[header_row + 1:].copy()
@@ -95,7 +91,6 @@ for file_path in files:
             df.dropna(axis=1, how='all', inplace=True)
             df.dropna(how='all', inplace=True)
 
-            # 🧹 Filter baris kosong per marketplace
             if clean_name == 'SHOPEE' and 'No. Pesanan' in df.columns:
                 before = len(df)
                 df = df[df['No. Pesanan'].notna() & (df['No. Pesanan'].astype(str).str.strip() != '')]
@@ -129,12 +124,10 @@ for file_path in files:
                 print(f"⚠️ {sheet_name} dari {brand} kosong setelah filter, dilewati.")
                 continue
 
-            # 🧩 Samakan struktur kolom dengan header template
             if clean_name in headers:
                 header_template = headers[clean_name]
                 df = df.reindex(columns=header_template)
 
-            # 🧠 Gabungkan ke combined_sheets
             if clean_name not in combined_sheets:
                 combined_sheets[clean_name] = df
             else:
@@ -143,7 +136,6 @@ for file_path in files:
         except Exception as e:
             print(f"⚠️ Gagal baca sheet {sheet_name} dari {brand}: {e}")
 
-# 💾 Simpan hasil gabungan
 if combined_sheets:
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         for sheet_name, df in combined_sheets.items():
