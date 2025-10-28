@@ -2,14 +2,13 @@ import pandas as pd
 import os
 import glob
 
-
 folder_path = r'D:\DataFromPrincipal\DataEBLO\merge'
-output_file = os.path.join(folder_path, 'eblo.xlsx')
+output_file = os.path.join(folder_path, 'eblo_clean.xlsx')
 
 headers = {
     "SHOPEE": [
         "NO", "BRAND", "No. Pesanan", "Status Pesanan", "Status Pembatalan/ Pengembalian",
-        "No Resi", "Opsi Pengiriman", "Antar ke counter/ pick-up",
+        "No. Resi", "Opsi Pengiriman", "Antar ke counter/ pick-up",
         "Pesanan Harus Dikirimkan Sebelum (Menghindari keterlambatan)",
         "Waktu Pengiriman Diatur", "Waktu Pesanan Dibuat", "Waktu Pembayaran Dilakukan",
         "SKU Induk", "Nama Produk", "Nomor Referensi SKU", "Nama Variasi",
