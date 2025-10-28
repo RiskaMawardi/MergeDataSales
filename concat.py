@@ -119,7 +119,7 @@ for file_path in files:
 
     for sheet_name in xls.sheet_names:
         clean_name = sheet_name.strip().upper()
-        
+
         # 🧩 Perbaikan mapping nama sheet
         if clean_name in ["TOKPED NEW", "TOKOPEDIA NEW", "TOKOPEDIA", "TIKTOK"]:
             clean_name = "TIKTOK"
@@ -190,10 +190,27 @@ for sheet_name, df in combined_sheets.items():
             )
         if "BRAND" in df_clean.columns:
             df_clean["BRAND"] = df_clean["BRAND"].apply(fix_brand)
+
         for c in ["Harga Sebelum Diskon","Harga Setelah Diskon","Jumlah","Total Harga Produk","Total Diskon"]:
             if c in df_clean.columns:
                 df_clean[c] = clean_numeric(df_clean[c])
 
+        if "Nomor Referensi SKU" in df_clean.columns and "SKU Induk" in df_clean.columns:
+            df_clean["SKU Induk"] = df_clean["Nomor Referensi SKU"]
+
+        if "Nama Produk" in df_clean.columns:
+            df_clean["Nama Produk"] = df_clean["Nama Produk"].astype(str).str.slice(0, 100)
+        
+        for c in [
+            "Harga Sebelum Diskon","Harga Setelah Diskon","Jumlah","Total Harga Produk",
+            "Total Diskon","Diskon Dari Penjual","Diskon Dari Shopee"
+        ]:
+            if c in df_clean.columns:
+                df_clean[c] = clean_numeric(df_clean[c])
+
+        for c in ["Username (Pembeli)", "Nama Penerima", "No# Telepon", "Alamat Pengiriman"]:
+            if c in df_clean.columns:
+                df_clean[c] = df_clean[c].apply(clean_text_general)
     # --- TOKPED ---
     elif name_lower.startswith("tokped"):
         if "Payment Date" in df_clean.columns:
