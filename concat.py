@@ -1,3 +1,6 @@
+import warnings
+warnings.simplefilter("ignore", UserWarning)
+
 import pandas as pd
 import os
 import glob
@@ -5,11 +8,10 @@ import re
 from openpyxl import load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-# 📁 Folder tempat semua file Excel
+# ====================== KONFIGURASI ======================
 folder_path = r'D:\DataFromPrincipal\DataEBLO\merge'
-final_output = os.path.join(folder_path, 'EBLO.xlsx')
+output_file = os.path.join(folder_path, 'EBLO.xlsx')
 
-# ================= HEADER TEMPLATE PER MARKETPLACE =================
 headers = {
     "SHOPEE": [
         "NO", "BRAND", "No. Pesanan", "Status Pesanan", "Status Pembatalan/ Pengembalian",
@@ -69,23 +71,57 @@ headers = {
     ]
 }
 
-# ================= GABUNGKAN FILES =================
-files = glob.glob(os.path.join(folder_path, '*.xlsx'))
+# ====================== UTILITAS CLEANING ======================
+def clean_text_general(text: str) -> str:
+    if pd.isna(text): return ""
+    text = re.sub(r"[^a-zA-Z0-9\s.,*]", "", str(text))
+    return re.sub(r"\s+", " ", text).strip()
+
+def clean_numeric(col_series):
+    return (
+        col_series.astype(str)
+        .str.replace(r"[^0-9]", "", regex=True)
+        .replace("", "0")
+        .astype(float)
+    )
+
+def fix_brand(x):
+    if pd.isna(x): return ""
+    s = str(x).upper()
+    s = re.sub(r"^(TIKTOK|TOKOPEDIA)\s+", "", s)
+    mapping = {"DR TEAL'S": "DR TEALS"}
+    for key, val in mapping.items():
+        if key in s:
+            s = val
+    return s
+
+def parse_datetime_safe(x):
+    if pd.isna(x) or str(x).strip() == "":
+        return ""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return pd.to_datetime(x, format=fmt)
+        except ValueError:
+            continue
+    return pd.NaT
+
+# ====================== MERGE + CLEAN ======================
+files = glob.glob(os.path.join(folder_path, "*.xlsx"))
 combined_sheets = {}
 
 for file_path in files:
-    if os.path.basename(file_path).lower() in ['eblo.xlsx', 'eblo_clean.xlsx', 'eblo_clean_with_format.xlsx']:
+    if os.path.basename(file_path).lower() in ["eblo.xlsx", "eblo_clean.xlsx", "eblo_cleaned.xlsx"]:
         continue
 
-    brand = os.path.splitext(os.path.basename(file_path))[0].split(' ')[0]
+    brand = os.path.splitext(os.path.basename(file_path))[0].split(" ")[0]
     print(f"\nProcessing: {brand}")
     xls = pd.ExcelFile(file_path)
 
     for sheet_name in xls.sheet_names:
         clean_name = sheet_name.strip().upper()
-
-        # Normalisasi nama sheet
-        if clean_name in ["TOKPED NEW", "TOKOPEDIA NEW", "TOKOPEDIA"]:
+        
+        # 🧩 Perbaikan mapping nama sheet
+        if clean_name in ["TOKPED NEW", "TOKOPEDIA NEW", "TOKOPEDIA", "TIKTOK"]:
             clean_name = "TIKTOK"
         elif clean_name in ["LAZADAA", "LAZADA ", "LAZADA"]:
             clean_name = "LAZADA"
@@ -94,75 +130,112 @@ for file_path in files:
 
         try:
             df = pd.read_excel(xls, sheet_name=sheet_name, dtype=str, header=None)
-            df.dropna(how='all', inplace=True)
-            if df.empty:
-                continue
+            df.dropna(how="all", inplace=True)
+            if df.empty: continue
 
             header_row = df.notna().sum(axis=1).idxmax()
             df.columns = df.iloc[header_row].astype(str).str.strip()
             df = df.iloc[header_row + 1:].copy()
-            df.dropna(axis=1, how='all', inplace=True)
-            df.dropna(how='all', inplace=True)
+            df.dropna(axis=1, how="all", inplace=True)
+            df.dropna(how="all", inplace=True)
 
-            key_col = {
-                'SHOPEE': 'No. Pesanan',
-                'TOKPED': 'Invoice',
-                'TIKTOK': 'Order ID',
-                'LAZADA': 'Order Item Id',
-                'BLIBLI': 'No. Order'
-            }.get(clean_name)
+            # --- Filter invalid rows ---
+            key_cols = {
+                "SHOPEE": "No. Pesanan",
+                "TOKPED": "Invoice",
+                "TIKTOK": "Order ID",
+                "LAZADA": "Order Item Id",
+                "BLIBLI": "No. Order"
+            }
+            if clean_name in key_cols and key_cols[clean_name] in df.columns:
+                key_col = key_cols[clean_name]
+                before = len(df)
+                df = df[df[key_col].notna() & (df[key_col].astype(str).str.strip() != "")]
+                after = len(df)
+                if before != after:
+                    print(f"➡️ {before - after} baris tanpa '{key_col}' dihapus ({clean_name})")
 
-            if key_col and key_col in df.columns:
-                df = df[df[key_col].notna() & (df[key_col].astype(str).str.strip() != '')]
+            if df.empty: continue
 
-        
+            # --- Standarkan header ---
             if clean_name in headers:
-                header_template = headers[clean_name]
-                df = df.reindex(columns=header_template)
+                df = df.reindex(columns=headers[clean_name])
 
-            # Gabung
-            if clean_name not in combined_sheets:
-                combined_sheets[clean_name] = df
-            else:
-                combined_sheets[clean_name] = pd.concat([combined_sheets[clean_name], df], ignore_index=True)
+            # --- Simpan sementara untuk clean ---
+            combined_sheets.setdefault(clean_name, [])
+            combined_sheets[clean_name].append(df)
 
-            print(f"✅ {sheet_name} dari {brand} berhasil ({len(df)} baris)")
-
+            print(f"✅ {sheet_name} dari {brand} OK ({len(df)} baris)")
         except Exception as e:
             print(f"⚠️ Gagal baca sheet {sheet_name} dari {brand}: {e}")
 
-# ================= SIMPAN FILE GABUNGAN TANPA FORMAT =================
-if combined_sheets:
-    with pd.ExcelWriter(final_output, engine='openpyxl') as writer:
-        for sheet_name, df in combined_sheets.items():
-            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-    print(f"\n✅ File gabungan tanpa format disimpan ke: {final_output}")
-else:
-    print("\n⚠️ Tidak ada data yang digabungkan.")
-    exit()
+# Gabungkan semua sheet
+for name in combined_sheets:
+    combined_sheets[name] = pd.concat(combined_sheets[name], ignore_index=True)
 
-# ================= SALIN FORMAT DARI FILE TEMPLATE PERTAMA =================
-template_file = files[0]
-wb_template = load_workbook(template_file)
-wb_clean = load_workbook(clean_file)
+# ====================== CLEANING PROSES ======================
+cleaned_sheets = {}
 
-for sheet_name in wb_clean.sheetnames:
-    ws_clean = wb_clean[sheet_name]
+for sheet_name, df in combined_sheets.items():
+    name_lower = sheet_name.lower()
+    df_clean = df.copy()
 
-    # Gunakan format sheet yang paling mirip dari template
-    ws_template = wb_template.active
-    if sheet_name in wb_template.sheetnames:
-        ws_template = wb_template[sheet_name]
+    # --- SHOPEE ---
+    if name_lower.startswith("shopee"):
+        if "Waktu Pembayaran Dilakukan" in df_clean.columns:
+            df_clean["Waktu Pembayaran Dilakukan"] = (
+                df_clean["Waktu Pembayaran Dilakukan"]
+                .apply(parse_datetime_safe)
+                .dt.strftime("%Y-%m-%d %H:%M")
+            )
+        if "BRAND" in df_clean.columns:
+            df_clean["BRAND"] = df_clean["BRAND"].apply(fix_brand)
+        for c in ["Harga Sebelum Diskon","Harga Setelah Diskon","Jumlah","Total Harga Produk","Total Diskon"]:
+            if c in df_clean.columns:
+                df_clean[c] = clean_numeric(df_clean[c])
 
-    # Terapkan lebar kolom dan style header
-    for col_idx, col in enumerate(ws_template.iter_cols(min_row=1, max_row=1), start=1):
-        cell = col[0]
-        if cell.has_style and col_idx <= ws_clean.max_column:
-            ws_clean.cell(row=1, column=col_idx)._style = cell._style
-        # Lebar kolom
-        col_letter = cell.column_letter
-        if col_letter in ws_template.column_dimensions:
-            ws_clean.column_dimensions[col_letter].width = ws_template.column_dimensions[col_letter].width
+    # --- TOKPED ---
+    elif name_lower.startswith("tokped"):
+        if "Payment Date" in df_clean.columns:
+            df_clean["Payment Date"] = (
+                pd.to_datetime(df_clean["Payment Date"], errors="coerce")
+                .dt.strftime("%d-%m-%Y %H:%M:%S")
+            )
+        if "BRAND" in df_clean.columns:
+            df_clean["BRAND"] = df_clean["BRAND"].apply(fix_brand)
 
-wb_clean.save(final_output)
-print(f"🎨 Format berhasil disalin dari template → {final_output}")
+    # --- TIKTOK ---
+    elif name_lower.startswith("tiktok"):
+        if "Nama Brand" in df_clean.columns:
+            df_clean["Nama Brand"] = df_clean["Nama Brand"].apply(fix_brand)
+
+    # --- LAZADA ---
+    elif name_lower.startswith("lazada"):
+        if "Created at" in df_clean.columns:
+            df_clean["Created at"] = (
+                pd.to_datetime(df_clean["Created at"], errors="coerce")
+                .dt.strftime("%m/%d/%Y")
+            )
+        for c in ["Paid Price", "Unit Price", "Shipping Fee"]:
+            if c in df_clean.columns:
+                df_clean[c] = clean_numeric(df_clean[c])
+
+    cleaned_sheets[sheet_name] = df_clean
+
+# ====================== SIMPAN DENGAN FORMAT ======================
+print("\n💾 Membuat file akhir dengan format...")
+with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
+    for sheet_name, df in cleaned_sheets.items():
+        df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+# Copy format header (opsional, seperti clean.py)
+wb_clean = load_workbook(output_file)
+for ws in wb_clean.worksheets:
+    for cell in ws[1]:
+        cell.font = cell.font.copy(bold=True)
+wb_clean.save(output_file)
+
+print(f"\n✅ Merge + Cleaning selesai → {output_file}")
+print(f"📊 Total sheets: {len(cleaned_sheets)}")
+for s, df in cleaned_sheets.items():
+    print(f"   - {s}: {len(df)} baris")
